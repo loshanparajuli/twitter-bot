@@ -1,52 +1,77 @@
-import Image from "next/image"
-import { formatDistanceToNow } from "date-fns"
-
-interface TweetProps {
-  tweet: {
-    id: string
-    created_at: string
-    text: string
-    user: {
-      name: string
-      screen_name: string
-      profile_image_url: string
+import { NextResponse } from "next/server"
+ 
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url)
+  const query = searchParams.get("query") || "@communeaidotorg OR #communeaidotorg" //You know, what this if for
+ 
+  try {
+    console.log("Fetching tweets for query:", query)
+ 
+    if (!process.env.TWITTER_BEARER_TOKEN) {
+      throw new Error("TWITTER_BEARER_TOKEN is not set")
     }
-    public_metrics: {
-      reply_count: number
-      retweet_count: number
-      like_count: number
-      quote_count: number
+ 
+    const url = new URL("https://api.twitter.com/2/tweets/search/recent")
+    url.searchParams.append("query", query)
+    url.searchParams.append("tweet.fields", "created_at,public_metrics")
+    url.searchParams.append("user.fields", "profile_image_url")
+    url.searchParams.append("expansions", "author_id")
+    url.searchParams.append("max_results", "10")
+ 
+    console.log("Fetching from URL:", url.toString())
+ 
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${process.env.TWITTER_BEARER_TOKEN}`,
+      },
+    })
+ 
+    if (!response.ok) {
+      const errorBody = await response.text()
+      console.error("Twitter API error:", response.status, errorBody)
+      throw new Error(`Twitter API responded with status: ${response.status}, Body: ${errorBody}`)
     }
+ 
+    const result = await response.json()
+ 
+    console.log("API response:", JSON.stringify(result, null, 2))
+ 
+    if (!result.data || result.data.length === 0) {
+      console.log("No tweets found")
+      return NextResponse.json({ tweets: [] })
+    }
+ 
+    const tweets = result.data.map((tweet: any) => {
+      const user = result.includes.users?.find((user: any) => user.id === tweet.author_id)
+      return {
+        id: tweet.id,
+        created_at: tweet.created_at,
+        text: tweet.text,
+        user: {
+          name: user?.name || "",
+          screen_name: user?.username || "",
+          profile_image_url: user?.profile_image_url || "",
+        },
+        public_metrics: tweet.public_metrics || {
+          reply_count: 0,
+          retweet_count: 0,
+          like_count: 0,
+          quote_count: 0,
+        },
+      }
+    })
+ 
+    console.log("Processed tweets:", JSON.stringify(tweets, null, 2))
+    return NextResponse.json({ tweets })
+  } catch (error: any) {
+    console.error("Error fetching tweets:", error)
+    return NextResponse.json(
+      {
+        error: "Failed to fetch tweets",
+        message: error.message,
+        stack: error.stack,
+      },
+      { status: 500 },
+    )
   }
 }
-
-export default function Tweet({ tweet }: TweetProps) {
-  const createdAt = new Date(tweet.created_at)
-
-  return (
-    <div className="bg-gray-800 p-4 rounded-lg shadow-md">
-      <div className="flex items-center mb-2">
-        <Image
-          src={tweet.user.profile_image_url || "/placeholder.svg"}
-          alt={tweet.user.name}
-          width={48}
-          height={48}
-          className="rounded-full mr-3"
-        />
-        <div>
-          <h2 className="font-semibold">{tweet.user.name}</h2>
-          <p className="text-sm text-gray-400">@{tweet.user.screen_name}</p>
-        </div>
-        <p className="text-sm text-gray-400 ml-auto">{formatDistanceToNow(createdAt, { addSuffix: true })}</p>
-      </div>
-      <p className="mb-3">{tweet.text}</p>
-      <div className="flex justify-between text-sm text-gray-400">
-        <span>💬 {tweet.public_metrics.reply_count}</span>
-        <span>🔁 {tweet.public_metrics.retweet_count}</span>
-        <span>❤️ {tweet.public_metrics.like_count}</span>
-        <span>🗨️ {tweet.public_metrics.quote_count}</span>
-      </div>
-    </div>
-  )
-}
-
